@@ -11,5 +11,3 @@ app = FastAPI()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") # Uses service key that bypasses RLS policies. DO NOT DISCLOSE THE KEY ON THE FRONTEND.
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-de
