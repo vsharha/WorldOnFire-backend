@@ -225,7 +225,7 @@ def get_heatmap() -> list[dict[str, Any]]:
             if location not in heatmap_data:
                 heatmap_data[location] = 0
 
-            heatmap_data[location] += abs(sentiment)
+            heatmap_data[location] += sentiment
 
         # Initialize geocoder
         geolocator = Nominatim(user_agent="worldonfire-backend")
