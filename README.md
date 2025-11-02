@@ -4,7 +4,7 @@
 
 Every minute, every second, every millisecond — something happens somewhere on the planet. The world is constantly on fire with events. Some are minor, but major ones shape history. **WorldOnFire** is a comprehensive real-time news heatmap that shows where the news is truly popping off, revealing the heartbeat of our planet in real time.
 
-![WorldOnFire Banner](<img width="2560" height="1418" alt="image" src="https://github.com/user-attachments/assets/cc17c849-802c-46fb-ac30-5e7247819962" />)
+![WorldOnFire Banner](https://github.com/user-attachments/assets/cc17c849-802c-46fb-ac30-5e7247819962)
 
 ## Overview
 
@@ -223,3 +223,4 @@ curl http://localhost:8000/api/cities
 <p align="center">
   <a href="#top">⬆️ Back to Top</a>
 </p>
+
