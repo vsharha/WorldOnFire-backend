@@ -7,6 +7,8 @@ import os
 import requests
 import json
 from typing import Optional
+import schedule
+from time import sleep
 
 from data_handlers import (
     get_asia_oceania_cities,
@@ -38,7 +40,7 @@ def welcome() -> dict[str, str]:
 
 
 @app.post("/news") # Add a news event to the Supabase news table
-def add_news(news_item: NewsItem):
+def add_news(news_item: NewsItem) -> dict:
     try: # Insert news item into the database
         result = supabase.table("news").insert({
             "title": news_item.title,
@@ -119,7 +121,7 @@ def fetch_and_save_articles(cities: list[str], region_name: str) -> dict: # help
     }
 
 @app.get("/news") # Fetch news from EventRegistry API and save to database
-def get_news():
+def get_news() -> dict:
     try:
         results = []
         asia_result = fetch_and_save_articles(get_asia_oceania_cities(), "Asia & Oceania")
@@ -148,7 +150,7 @@ def get_news():
         raise HTTPException(status_code=500, detail=f"Failed to fetch and save news: {str(general_error)}")
 
 @app.get("/news/search") # Retrieve 10 latest news from the database, optionally filtered by city location
-def search_news(location: Optional[str] = None):
+def search_news(location: Optional[str] = None) -> dict:
     try:
         query = supabase.table("news").select("*")
 
@@ -167,7 +169,7 @@ def search_news(location: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
 @app.get("/news/heatmap") # Generate heatmap data by summing absolute sentiment scores for each city
-def get_heatmap():
+def get_heatmap() -> dict[str, float]:
     try: # Fetch all news from database with location and sentiment
         result = supabase.table("news").select("location, sentiment").execute()
         heatmap_data = {}
@@ -188,3 +190,9 @@ def get_heatmap():
 
     except Exception as heatmap_error:
         raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")
+
+schedule.every(10).minutes.do(add_news)
+
+while True:
+    schedule.run_pending()
+    sleep(1)
