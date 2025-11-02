@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 import requests
 import json
-from typing import Optional
+from typing import Optional, Any
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -199,7 +199,7 @@ def search_news(location: Optional[str] = None) -> dict:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
 @app.get("/news/heatmap") # Generate heatmap data by summing absolute sentiment scores for each city
-def get_heatmap() -> dict[str, float]:
+def get_heatmap() -> list[dict[str, Any]]:
     try: # Fetch all news from database with location and sentiment
         result = supabase.table("news").select("location, sentiment").execute()
         heatmap_data = {}
@@ -216,7 +216,7 @@ def get_heatmap() -> dict[str, float]:
 
             heatmap_data[location] += abs(sentiment)
 
-        return heatmap_data
+        return [{"location": key, "sentiment": value} for key, value in heatmap_data.items()]
 
     except Exception as heatmap_error:
         raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")
