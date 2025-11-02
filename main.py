@@ -233,7 +233,7 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
-@app.get("/news/heatmap") # Generate heatmap data by summing absolute sentiment scores for each city
+@app.get("/news/heatmap") # Generate heatmap data by averaging sentiment scores for each city
 def get_heatmap() -> list[dict[str, Any]]:
     try: # Fetch all news from database with location, sentiment, and title
         result = supabase.table("news").select("location, sentiment, title").execute()
@@ -258,16 +258,17 @@ def get_heatmap() -> list[dict[str, Any]]:
                 continue
 
             if location not in heatmap_data:
-                heatmap_data[location] = 0
+                heatmap_data[location] = {"sum": 0, "count": 0}
 
-            heatmap_data[location] += sentiment
+            heatmap_data[location]["sum"] += sentiment
+            heatmap_data[location]["count"] += 1
 
         # Initialize geocoder
         geolocator = Nominatim(user_agent="worldonfire-backend")
 
-        # Add coordinates to each location
+        # Add coordinates to each location and calculate average sentiment
         result_data = []
-        for location, sentiment_value in heatmap_data.items():
+        for location, sentiment_data in heatmap_data.items():
             coordinates = None
             try:
                 # Geocode the location
@@ -278,9 +279,12 @@ def get_heatmap() -> list[dict[str, Any]]:
                 # Log error but continue with None coordinates
                 print(f"Geocoding error for {location}: {str(geo_error)}")
 
+            # Calculate average sentiment
+            average_sentiment = sentiment_data["sum"] / sentiment_data["count"] if sentiment_data["count"] > 0 else 0
+
             result_data.append({
                 "location": location,
-                "intensity": sentiment_value,
+                "intensity": average_sentiment,
                 "coordinates": coordinates
             })
 
