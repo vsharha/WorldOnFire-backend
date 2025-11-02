@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Header, HTTPException, Depends, Request, Body, BackgroundTasks
 from supabase import create_client, Client
 
-from pydantic import BaseModel, constr, field_validator, model_validator
+from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 import requests
@@ -165,3 +165,26 @@ def search_news(location: Optional[str] = None):
         }
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
+
+@app.get("/news/heatmap") # Generate heatmap data by summing absolute sentiment scores for each city
+def get_heatmap():
+    try: # Fetch all news from database with location and sentiment
+        result = supabase.table("news").select("location, sentiment").execute()
+        heatmap_data = {}
+
+        for news_item in result.data:
+            location = news_item.get("location", "Unknown")
+            sentiment = news_item.get("sentiment")
+
+            if location == "Unknown" or sentiment is None:
+                continue
+
+            if location not in heatmap_data:
+                heatmap_data[location] = 0
+
+            heatmap_data[location] += abs(sentiment)
+
+        return heatmap_data
+
+    except Exception as heatmap_error:
+        raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")
