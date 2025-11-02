@@ -94,19 +94,18 @@ cd worldonfire/backend
 
 2. **Create virtual environment**
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv init
 ```
 
 3. **Install dependencies**
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 4. **Configure environment variables**
 Create a `.env` file in the backend directory:
 ```env
-EVENT_REGISTRY_API_KEY=your_event_registry_api_key
+NEWS_API=your_event_registry_api_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
 ```
@@ -150,9 +149,7 @@ npm install
 3. **Configure environment variables**
 Create a `.env.local` file:
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
 ```
 
 4. **Run the development server**
