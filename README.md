@@ -2,7 +2,7 @@
 
 > **Where is the world heating up right now?**
 
-Every minute, every second, every millisecond — something happens somewhere on the planet. The world is constantly on fire with events. Some are minor, but major ones shape history. **WorldOnFire** is a comprehensive real-time news heatmap that shows where the news is truly popping off, revealing the heartbeat of our planet in real time.
+Every minute, every second, every millisecond – something happens somewhere on the planet. The world is constantly on fire with events. Some are minor, but major ones shape history. **WorldOnFire** is a comprehensive real-time news heatmap that shows where the news is truly popping off, revealing the heartbeat of our planet in real time.
 
 **Live App:** [https://world-on-fire.vercel.app](https://world-on-fire.vercel.app)
 
@@ -225,5 +225,6 @@ curl http://localhost:8000/api/cities
 <p align="center">
   <a href="#top">⬆️ Back to Top</a>
 </p>
+
 
 
