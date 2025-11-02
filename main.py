@@ -65,6 +65,7 @@ class NewsItem(BaseModel):
     location: str
     image_url: Optional[str] = None
     description: Optional[str] = None
+    url: Optional[str] = None
 
 @app.get("/")
 def welcome() -> dict[str, str]:
@@ -78,7 +79,8 @@ def add_news(news_item: NewsItem) -> dict:
             "title": news_item.title,
             "location": news_item.location,
             "image_url": news_item.image_url,
-            "description": news_item.description
+            "description": news_item.description,
+            "url": news_item.url
         }).execute()
 
         return {
@@ -134,6 +136,7 @@ def fetch_and_save_articles(cities: list[str], region_name: str) -> dict: # help
                     "image_url": article.get("image"),
                     "description": article.get("body"),
                     "sentiment": article.get("sentiment"),
+                    "url": article.get("url"),
                 }
 
                 supabase.table("news").insert(news_data).execute()
