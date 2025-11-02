@@ -232,7 +232,7 @@ def get_heatmap() -> list[dict[str, Any]]:
 
             result_data.append({
                 "location": location,
-                "sentiment": sentiment_value,
+                "intensity": sentiment_value,
                 "coordinates": coordinates
             })
 
