@@ -100,7 +100,7 @@ def fetch_and_save_articles(cities: list[str], region_name: str) -> dict:
                     "location": location,
                     "image_url": article.get("image"),
                     "description": article.get("body"),
-                    "sentiment": article.get("sentiment", {}).get("label", {}).get("eng", "Unknown"),
+                    "sentiment": article.get("sentiment"),
                 }
 
                 supabase.table("news").insert(news_data).execute()
