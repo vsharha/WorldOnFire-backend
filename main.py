@@ -22,7 +22,7 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") # Uses service key that
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
-def get_cities_query_or_clause(cities: list[str]) -> list[dict]: # Generate the $or clause with Wikipedia URIs for given cities
+def get_cities_query_or_clause(cities: list[str]) -> list[dict]: # Helper to generate the $or clause with Wikipedia URIs for given cities
     return [{"locationUri": f"http://en.wikipedia.org/wiki/{city}"} for city in cities]
 
 # Pydantic model for news data
@@ -55,8 +55,7 @@ def add_news(news_item: NewsItem):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add news item: {str(e)}")
 
-def fetch_and_save_articles(cities: list[str], region_name: str) -> dict:
-    """Helper function to fetch articles for specific cities and save to database"""
+def fetch_and_save_articles(cities: list[str], region_name: str) -> dict: # helper to fetch articles for specific cities and save to database
     url = "https://eventregistry.org/api/v1/minuteStreamArticles"
 
     query_obj = {
@@ -148,14 +147,16 @@ def get_news():
     except Exception as general_error:
         raise HTTPException(status_code=500, detail=f"Failed to fetch and save news: {str(general_error)}")
 
-@app.get("/news/search") # Retrieve saved news from the database, optionally filtered by city location
+@app.get("/news/search") # Retrieve 10 latest news from the database, optionally filtered by city location
 def search_news(location: Optional[str] = None):
     try:
         query = supabase.table("news").select("*")
 
         if location: # If location provided
             query = query.eq("location", location)
-        result = query.execute()
+
+        # Order by created_at descending and limit to 10 latest news
+        result = query.order("created_at", desc=True).limit(10).execute()
 
         return {
             "status": "success",
