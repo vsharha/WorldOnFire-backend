@@ -9,6 +9,8 @@ import json
 from typing import Optional, Any
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 from starlette.middleware.cors import CORSMiddleware
 
@@ -190,11 +192,7 @@ def search_news(location: Optional[str] = None) -> dict:
         # Order by created_at descending and limit to 10 latest news
         result = query.order("created_at", desc=True).limit(10).execute()
 
-        return {
-            "status": "success",
-            "count": len(result.data),
-            "data": result.data
-        }
+        return result.data
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
@@ -216,7 +214,29 @@ def get_heatmap() -> list[dict[str, Any]]:
 
             heatmap_data[location] += abs(sentiment)
 
-        return [{"location": key, "sentiment": value} for key, value in heatmap_data.items()]
+        # Initialize geocoder
+        geolocator = Nominatim(user_agent="worldonfire-backend")
+
+        # Add coordinates to each location
+        result_data = []
+        for location, sentiment_value in heatmap_data.items():
+            coordinates = None
+            try:
+                # Geocode the location
+                geo_result = geolocator.geocode(location, timeout=10)
+                if geo_result:
+                    coordinates = [geo_result.latitude, geo_result.longitude]
+            except (GeocoderTimedOut, GeocoderServiceError) as geo_error:
+                # Log error but continue with None coordinates
+                print(f"Geocoding error for {location}: {str(geo_error)}")
+
+            result_data.append({
+                "location": location,
+                "sentiment": sentiment_value,
+                "coordinates": coordinates
+            })
+
+        return result_data
 
     except Exception as heatmap_error:
         raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")

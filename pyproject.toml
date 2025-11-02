@@ -9,6 +9,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "eventregistry>=9.1",
     "fastapi[standard]>=0.120.4",
+    "geopy>=2.4.1",
     "pydantic>=2.12.3",
     "schedule>=1.2.2",
     "supabase>=2.23.0",
