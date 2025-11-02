@@ -9,6 +9,7 @@ import json
 from typing import Optional
 import schedule
 from time import sleep
+import threading
 
 from data_handlers import (
     get_asia_oceania_cities,
@@ -191,8 +192,12 @@ def get_heatmap() -> dict[str, float]:
     except Exception as heatmap_error:
         raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")
 
-schedule.every(10).minutes.do(add_news)
+# Scheduler function to run in background thread
+def run_scheduler():
+    while True:
+        schedule.run_pending()
+        sleep(1)
 
-while True:
-    schedule.run_pending()
-    sleep(1)
+schedule.every(10).minutes.do(get_news)
+scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+scheduler_thread.start()
