@@ -7,9 +7,16 @@ import os
 import requests
 import json
 from typing import Optional
-import schedule
-from time import sleep
-import threading
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from starlette.middleware.cors import CORSMiddleware
+
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000"
+]
 
 from data_handlers import (
     get_asia_oceania_cities,
@@ -18,12 +25,33 @@ from data_handlers import (
 )
 load_dotenv()
 
-app = FastAPI()
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the scheduler
+    scheduler.add_job(get_news, 'interval', minutes=10)
+    scheduler.start()
+
+    yield  # App is running
+
+    # Shutdown: Stop the scheduler
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") # Uses service key that bypasses RLS policies. DO NOT DISCLOSE THE KEY ON THE FRONTEND.
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 def get_cities_query_or_clause(cities: list[str]) -> list[dict]: # Helper to generate the $or clause with Wikipedia URIs for given cities
     return [{"locationUri": f"http://en.wikipedia.org/wiki/{city}"} for city in cities]
@@ -191,13 +219,3 @@ def get_heatmap() -> dict[str, float]:
 
     except Exception as heatmap_error:
         raise HTTPException(status_code=500, detail=f"Failed to generate heatmap: {str(heatmap_error)}")
-
-# Scheduler function to run in background thread
-def run_scheduler():
-    while True:
-        schedule.run_pending()
-        sleep(1)
-
-schedule.every(10).minutes.do(get_news)
-scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-scheduler_thread.start()
