@@ -184,6 +184,16 @@ def get_news() -> dict:
     except Exception as general_error:
         raise HTTPException(status_code=500, detail=f"Failed to fetch and save news: {str(general_error)}")
 
+@app.get("/news/latest") # Retrieve 10 latest news from the database
+def get_latest_news() -> list[dict[str, Any]]:
+    try:
+        # Order by created_at descending and limit to 10 latest news
+        result = supabase.table("news").select("*").order("created_at", desc=True).limit(10).execute()
+
+        return result.data
+    except Exception as latest_error:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve latest news: {str(latest_error)}")
+
 @app.get("/news/search") # Retrieve 10 latest news from the database, optionally filtered by city location
 def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
     try:
