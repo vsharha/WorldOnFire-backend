@@ -187,10 +187,22 @@ def get_news() -> dict:
 @app.get("/news/latest") # Retrieve 10 latest news from the database
 def get_latest_news() -> list[dict[str, Any]]:
     try:
-        # Order by created_at descending and limit to 10 latest news
-        result = supabase.table("news").select("*").order("created_at", desc=True).limit(10).execute()
+        # Order by created_at descending and fetch more to account for duplicates
+        result = supabase.table("news").select("*").order("created_at", desc=True).limit(50).execute()
 
-        return result.data
+        # Deduplicate by title, keeping the most recent (first occurrence)
+        seen_titles = set()
+        unique_news = []
+
+        for news_item in result.data:
+            title = news_item.get("title")
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_news.append(news_item)
+                if len(unique_news) >= 10:
+                    break
+
+        return unique_news
     except Exception as latest_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve latest news: {str(latest_error)}")
 
@@ -202,20 +214,43 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
         if location: # If location provided
             query = query.eq("location", location)
 
-        # Order by created_at descending and limit to 10 latest news
-        result = query.order("created_at", desc=True).limit(10).execute()
+        # Order by created_at descending and fetch more to account for duplicates
+        result = query.order("created_at", desc=True).limit(50).execute()
 
-        return result.data
+        # Deduplicate by title, keeping the most recent (first occurrence)
+        seen_titles = set()
+        unique_news = []
+
+        for news_item in result.data:
+            title = news_item.get("title")
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_news.append(news_item)
+                if len(unique_news) >= 10:
+                    break
+
+        return unique_news
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
 @app.get("/news/heatmap") # Generate heatmap data by summing absolute sentiment scores for each city
 def get_heatmap() -> list[dict[str, Any]]:
-    try: # Fetch all news from database with location and sentiment
-        result = supabase.table("news").select("location, sentiment").execute()
-        heatmap_data = {}
+    try: # Fetch all news from database with location, sentiment, and title
+        result = supabase.table("news").select("location, sentiment, title").execute()
+
+        # Deduplicate by title before calculating intensity
+        seen_titles = set()
+        unique_articles = []
 
         for news_item in result.data:
+            title = news_item.get("title")
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                unique_articles.append(news_item)
+
+        heatmap_data = {}
+
+        for news_item in unique_articles:
             location = news_item.get("location", "Unknown")
             sentiment = news_item.get("sentiment")
 
