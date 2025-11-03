@@ -4,7 +4,6 @@ from supabase import create_client, Client
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
-import requests
 import json
 from typing import Optional, Any
 from contextlib import asynccontextmanager
@@ -14,6 +13,13 @@ from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 from datetime import datetime
 
 from starlette.middleware.cors import CORSMiddleware
+from rss_feeds import parse_feeds_by_city
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+load_dotenv()
+
+# Initialize sentiment analyzer
+sentiment_analyzer = SentimentIntensityAnalyzer()
 
 origins = [
     "http://localhost:3000",
@@ -21,13 +27,6 @@ origins = [
     "http://127.0.0.1:8000",
     "https://world-on-fire.vercel.app"
 ]
-
-from data_handlers import (
-    get_asia_oceania_cities,
-    get_europe_africa_middleeast_cities,
-    get_americas_cities
-)
-load_dotenv()
 
 # Initialize scheduler
 scheduler = BackgroundScheduler()
@@ -56,9 +55,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-
-def get_cities_query_or_clause(cities: list[str]) -> list[dict]: # Helper to generate the $or clause with Wikipedia URIs for given cities
-    return [{"locationUri": f"http://en.wikipedia.org/wiki/{city}"} for city in cities]
 
 def get_cached_coordinates(location: str) -> Optional[list[float]]:
     """
@@ -107,7 +103,7 @@ def cache_coordinates(location: str, latitude: float, longitude: float) -> bool:
 # Pydantic model for news data
 class NewsItem(BaseModel):
     title: str
-    location: str
+    locations: list[str]  # Array of city names
     image_url: Optional[str] = None
     description: Optional[str] = None
     url: Optional[str] = None
@@ -116,118 +112,85 @@ class NewsItem(BaseModel):
 def welcome() -> dict[str, str]:
     return {"welcome_message": "This is a WorldOnFire official API. The World is on Fire right now."}
 
+def fetch_and_save_rss_articles() -> dict:
+    """
+    Fetch articles from RSS feeds and save to database.
+    Uses the parse_feeds_by_city function from rss_feeds.py.
 
-@app.post("/news") # Add a news event to the Supabase news table
-def add_news(news_item: NewsItem) -> dict:
-    try: # Insert news item into the database
-        result = supabase.table("news").insert({
-            "title": news_item.title,
-            "location": news_item.location,
-            "image_url": news_item.image_url,
-            "description": news_item.description,
-            "url": news_item.url
-        }).execute()
-
-        return {
-            "status": "success",
-            "message": "News item added successfully",
-            "data": result.data
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add news item: {str(e)}")
-
-def fetch_and_save_articles(cities: list[str], region_name: str) -> dict: # helper to fetch articles for specific cities and save to database
-    url = "https://eventregistry.org/api/v1/minuteStreamArticles"
-
-    query_obj = {
-        "$query": {
-            "$and": [
-                {
-                    "$or": get_cities_query_or_clause(cities)
-                },
-                {"lang": "eng"}
-            ]
-        }
-    }
-
-    params = {
-        "query": json.dumps(query_obj),
-        "recentActivityArticlesMaxArticleCount": 10,
-        "recentActivityArticlesUpdatesAfterMinsAgo": 10,
-        "apiKey": os.getenv("NEWS_API")
-    }
-
-    response = requests.get(url, params=params, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-    print(data)
-
+    Returns:
+        dict: Statistics about the saved articles
+    """
     saved_count = 0
     errors = []
 
-    # Parse the correct structure: recentActivityArticles.activity
-    if "recentActivityArticles" in data and "activity" in data["recentActivityArticles"]:
-        articles = data["recentActivityArticles"]["activity"]
+    try:
+        # Parse RSS feeds (already filters for tracked cities)
+        articles = parse_feeds_by_city(filter_tracked_only=True)
 
+        print(f"Found {len(articles)} articles from RSS feeds")
+
+        # Save each article to the database
         for article in articles:
-            try: # Extract location from article
-                location = "Unknown"
-                if "location" in article and article["location"]:
-                    location = article["location"].get("label", {}).get("eng", "Unknown")
+            try:
+                # Get all locations for this article
+                locations = article.get("locations", [])
 
+                if not locations:
+                    continue
+
+                # Calculate sentiment from title and summary
+                text_for_sentiment = f"{article.get('title', '')} {article.get('summary', '')}"
+                sentiment_scores = sentiment_analyzer.polarity_scores(text_for_sentiment)
+                # Use compound score (ranges from -1 to 1)
+                sentiment_value = sentiment_scores['compound']
+
+                # Store article once with all locations in array
                 news_data = {
                     "title": article.get("title", "No title"),
-                    "location": location,
-                    "image_url": article.get("image"),
-                    "description": article.get("body"),
-                    "sentiment": article.get("sentiment"),
-                    "url": article.get("url"),
+                    "locations": locations,  # Array of all locations mentioned
+                    "image_url": None,  # RSS feeds typically don't include images
+                    "description": article.get("summary", ""),
+                    "sentiment": sentiment_value,  # Calculated using VADER sentiment analysis
+                    "url": article.get("link"),
                 }
 
-                supabase.table("news").insert(news_data).execute()
-                saved_count += 1
+                # Check if this article already exists (based on URL only)
+                existing = supabase.table("news").select("id").eq("url", news_data["url"]).execute()
+
+                if not existing.data:  # Only insert if not a duplicate
+                    supabase.table("news").insert(news_data).execute()
+                    saved_count += 1
 
             except Exception as article_error:
-                errors.append(str(article_error))
+                errors.append(f"Error saving article '{article.get('title', 'Unknown')}': {str(article_error)}")
                 continue
-    else:
-        articles = []
+
+    except Exception as e:
+        errors.append(f"Error parsing RSS feeds: {str(e)}")
 
     return {
-        "region": region_name,
         "saved_count": saved_count,
-        "total_articles": len(articles),
+        "total_articles": len(articles) if 'articles' in locals() else 0,
         "errors": errors
     }
 
-@app.get("/news") # Fetch news from EventRegistry API and save to database
+@app.get("/news") # Fetch news from RSS feeds and save to database
 def get_news() -> dict:
     try:
-        results = []
-        asia_result = fetch_and_save_articles(get_asia_oceania_cities(), "Asia & Oceania")
-        results.append(asia_result)
-        europe_result = fetch_and_save_articles(get_europe_africa_middleeast_cities(), "Europe, Africa & Middle East")
-        results.append(europe_result)
-        americas_result = fetch_and_save_articles(get_americas_cities(), "Americas")
-        results.append(americas_result)
-
-        total_saved = sum(r["saved_count"] for r in results)
-        total_articles = sum(r["total_articles"] for r in results)
-        all_errors = [err for r in results for err in r["errors"]]
+        # Fetch and save articles from RSS feeds
+        result = fetch_and_save_rss_articles()
 
         return {
             "status": "success",
-            "message": f"Fetched and saved {total_saved} news articles from 3 API calls",
-            "total_saved": total_saved,
-            "total_articles": total_articles,
-            "results_by_region": results,
-            "errors": all_errors if all_errors else None
+            "message": f"Fetched and saved {result['saved_count']} news articles from RSS feeds",
+            "total_saved": result["saved_count"],
+            "total_articles": result["total_articles"],
+            "errors": result["errors"] if result["errors"] else None
         }
 
-    except requests.exceptions.RequestException as req_error:
-        raise HTTPException(status_code=500, detail=f"API request failed: {str(req_error)}")
     except Exception as general_error:
         raise HTTPException(status_code=500, detail=f"Failed to fetch and save news: {str(general_error)}")
+
 
 @app.get("/news/latest") # Retrieve 10 latest news from the database
 def get_latest_news() -> list[dict[str, Any]]:
@@ -256,8 +219,9 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
     try:
         query = supabase.table("news").select("*")
 
-        if location: # If location provided
-            query = query.eq("location", location)
+        if location: # If location provided, search in locations array
+            # Use PostgreSQL array contains operator for locations array search
+            query = query.contains("locations", [location])
 
         # Order by created_at descending and fetch more to account for duplicates
         result = query.order("created_at", desc=True).limit(50).execute()
@@ -280,8 +244,8 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
 
 @app.get("/news/heatmap") # Generate heatmap data by averaging sentiment scores for each city
 def get_heatmap() -> list[dict[str, Any]]:
-    try: # Fetch all news from database with location, sentiment, and title
-        result = supabase.table("news").select("location, sentiment, title").execute()
+    try: # Fetch all news from database with locations array, sentiment, and title
+        result = supabase.table("news").select("locations, sentiment, title").execute()
 
         # Deduplicate by title before calculating intensity
         seen_titles = set()
@@ -296,17 +260,22 @@ def get_heatmap() -> list[dict[str, Any]]:
         heatmap_data = {}
 
         for news_item in unique_articles:
-            location = news_item.get("location", "Unknown")
             sentiment = news_item.get("sentiment")
+            locations = news_item.get("locations", [])
 
-            if location == "Unknown" or sentiment is None:
+            if sentiment is None or not locations:
                 continue
 
-            if location not in heatmap_data:
-                heatmap_data[location] = {"sum": 0, "count": 0}
+            # Count sentiment for each location mentioned in the article
+            for location in locations:
+                if not location or location == "Unknown":
+                    continue
 
-            heatmap_data[location]["sum"] += sentiment
-            heatmap_data[location]["count"] += 1
+                if location not in heatmap_data:
+                    heatmap_data[location] = {"sum": 0, "count": 0}
+
+                heatmap_data[location]["sum"] += sentiment
+                heatmap_data[location]["count"] += 1
 
         # Initialize geocoder (only used if cache miss)
         geolocator = Nominatim(user_agent="worldonfire-backend")

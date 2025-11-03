@@ -15,8 +15,8 @@ def get_europe_africa_middleeast_cities() -> list[str]:
 def get_americas_cities() -> list[str]:
     """Returns major cities from North and South America"""
     return [
-        "New_York_City", "Los_Angeles", "Mexico_City", "São_Paulo", "Toronto",
-        "Buenos_Aires", "Rio_de_Janeiro", "Chicago", "Bogotá", "Lima"
+        "New York", "Los Angeles", "Mexico City", "São Paulo", "Toronto",
+        "Buenos Aires", "Rio de Janeiro", "Chicago", "Bogotá", "Lima"
     ]
 
 def get_all_cities() -> list[str]:

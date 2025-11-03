@@ -121,11 +121,6 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
     # Get list of tracked cities for filtering
     tracked_cities = set(get_all_cities())
 
-    # Normalize city names (replace underscores with spaces for matching)
-    # e.g., "New_York_City" becomes "New York City"
-    normalized_tracked = {city.replace("_", " ") for city in tracked_cities}
-    normalized_tracked.update(tracked_cities)  # Keep original names too
-
     # Use dict to store articles by their link (unique identifier)
     # This prevents duplicates and allows us to accumulate locations per article
     articles_dict = {}
@@ -134,8 +129,9 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
     print(f"Parsing {len(feeds)} feeds in parallel with {max_workers} workers...")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all feed parsing tasks
+
         future_to_url = {
-            executor.submit(parse_single_feed, url, normalized_tracked, filter_tracked_only): url
+            executor.submit(parse_single_feed, url, tracked_cities, filter_tracked_only): url
             for url in feeds
         }
 
