@@ -160,51 +160,8 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
     return list(articles_dict.values())
 
 if __name__ == "__main__":
-    # Parse all feeds and get results as list of articles (filtered to tracked cities only)
     articles = parse_feeds_by_city(filter_tracked_only=True)
 
-    # Get total tracked cities for comparison
-    total_tracked = len(get_all_cities())
-
-    # Count unique cities mentioned across all articles
     unique_cities = set()
     for article in articles:
         unique_cities.update(article["locations"])
-
-    # Display results
-    print(f"\n{'='*60}")
-    print(f"TRACKED CITIES: Found news mentioning {len(unique_cities)}/{total_tracked} tracked cities")
-    print(f"{'='*60}\n")
-
-    # Sort articles by number of locations (most locations first)
-    sorted_articles = sorted(articles, key=lambda x: len(x["locations"]), reverse=True)
-
-    # Display first 10 articles
-    print(f"Showing first 10 articles (out of {len(articles)} total):\n")
-    for i, article in enumerate(sorted_articles[:10], 1):
-        print(f"{i}. [{article['source']}] {article['title']}")
-        print(f"   Locations: {', '.join(article['locations'])}")
-        print(f"   Link: {article['link']}")
-        print(f"   Published: {article['published']}")
-        if article.get('summary'):
-            print(f"   Summary: {article['summary']}")
-        print()
-
-    # Show summary statistics
-    print(f"{'='*60}")
-    print(f"SUMMARY:")
-    print(f"  Total tracked cities with news: {len(unique_cities)}/{total_tracked}")
-    print(f"  Total articles collected: {len(articles)}")
-    if articles:
-        avg_locations = sum(len(a["locations"]) for a in articles) / len(articles)
-        print(f"  Average locations per article: {avg_locations:.1f}")
-    else:
-        print("  No articles found")
-    print(f"{'='*60}")
-
-    # Example usage: Access the results programmatically
-    print("\n\n# HOW TO USE THE RESULTS:")
-    print("# articles is a list of article dictionaries")
-    print("# Each article has a 'locations' field with list of cities")
-    print(f"# Example: articles[0] = {articles[0] if articles else 'No articles'}")
-    print(f"# Cities mentioned: {sorted(list(unique_cities))}")
