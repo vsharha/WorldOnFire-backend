@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, HTTPException, Depends, Request, Body, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from supabase import create_client, Client
 
 from pydantic import BaseModel
@@ -119,22 +119,9 @@ def get_news() -> dict:
 @app.get("/news/latest") # Retrieve 10 latest news from the database
 def get_latest_news() -> list[dict[str, Any]]:
     try:
-        # Order by created_at descending and fetch more to account for duplicates
-        result = supabase.table("news").select("*").order("created_at", desc=True).limit(50).execute()
-
-        # Deduplicate by title, keeping the most recent (first occurrence)
-        seen_titles = set()
-        unique_news = []
-
-        for news_item in result.data:
-            title = news_item.get("title")
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                unique_news.append(news_item)
-                if len(unique_news) >= 10:
-                    break
-
-        return unique_news
+        # Order by created_at descending and limit to 10
+        result = supabase.table("news").select("*").order("created_at", desc=True).limit(10).execute()
+        return result.data
     except Exception as latest_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve latest news: {str(latest_error)}")
 
@@ -147,43 +134,20 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
             # Use PostgreSQL array contains operator for locations array search
             query = query.contains("locations", [location])
 
-        # Order by created_at descending and fetch more to account for duplicates
-        result = query.order("created_at", desc=True).limit(50).execute()
-
-        # Deduplicate by title, keeping the most recent (first occurrence)
-        seen_titles = set()
-        unique_news = []
-
-        for news_item in result.data:
-            title = news_item.get("title")
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                unique_news.append(news_item)
-                if len(unique_news) >= 10:
-                    break
-
-        return unique_news
+        # Order by created_at descending and limit to 10
+        result = query.order("created_at", desc=True).limit(10).execute()
+        return result.data
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
 
 @app.get("/news/heatmap") # Generate heatmap data by averaging sentiment scores for each city
 def get_heatmap() -> list[dict[str, Any]]:
-    try: # Fetch all news from database with locations array, sentiment, and title
-        result = supabase.table("news").select("locations, sentiment, title").execute()
-
-        # Deduplicate by title before calculating intensity
-        seen_titles = set()
-        unique_articles = []
-
-        for news_item in result.data:
-            title = news_item.get("title")
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                unique_articles.append(news_item)
+    try: # Fetch all news from database with locations array and sentiment
+        result = supabase.table("news").select("locations, sentiment").execute()
 
         heatmap_data = {}
 
-        for news_item in unique_articles:
+        for news_item in result.data:
             sentiment = news_item.get("sentiment")
             locations = news_item.get("locations", [])
 
