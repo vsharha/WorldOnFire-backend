@@ -72,14 +72,14 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
             # Use link as unique identifier for the article
             article_link = entry.link
 
-            # Create article entry
+            # Create article entry (convert to set first to remove duplicates)
             articles_dict[article_link] = {
                 "title": entry.title,
                 "link": article_link,
                 "source": feed.feed.get("title", "Unknown"),
                 "published": entry.get("published", "Unknown"),
                 "summary": entry.get("summary", "")[:200],  # First 200 chars
-                "locations": list(cities)
+                "locations": list(set(cities))
             }
 
     except Exception as e:
