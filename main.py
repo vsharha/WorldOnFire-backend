@@ -6,20 +6,14 @@ from dotenv import load_dotenv
 import os
 import json
 from typing import Optional, Any
-from contextlib import asynccontextmanager
-from apscheduler.schedulers.background import BackgroundScheduler
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 from datetime import datetime
 
 from starlette.middleware.cors import CORSMiddleware
-from rss_feeds import parse_feeds_by_city
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from news_scheduler import lifespan as scheduler_lifespan, fetch_and_save_rss_articles
 
 load_dotenv()
-
-# Initialize sentiment analyzer
-sentiment_analyzer = SentimentIntensityAnalyzer()
 
 origins = [
     "http://localhost:3000",
@@ -28,25 +22,16 @@ origins = [
     "https://world-on-fire.vercel.app"
 ]
 
-# Initialize scheduler
-scheduler = BackgroundScheduler()
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Start the scheduler
-    scheduler.add_job(get_news, 'interval', minutes=10)
-    scheduler.start()
-
-    yield  # App is running
-
-    # Shutdown: Stop the scheduler
-    scheduler.shutdown()
-
-app = FastAPI(lifespan=lifespan)
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") # Uses service key that bypasses RLS policies. DO NOT DISCLOSE THE KEY ON THE FRONTEND.
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# Create lifespan with supabase client
+async def lifespan(app: FastAPI):
+    async with scheduler_lifespan(app, supabase):
+        yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -112,73 +97,12 @@ class NewsItem(BaseModel):
 def welcome() -> dict[str, str]:
     return {"welcome_message": "This is a WorldOnFire official API. The World is on Fire right now."}
 
-def fetch_and_save_rss_articles() -> dict:
-    """
-    Fetch articles from RSS feeds and save to database.
-    Uses the parse_feeds_by_city function from rss_feeds.py.
-
-    Returns:
-        dict: Statistics about the saved articles
-    """
-    saved_count = 0
-    errors = []
-
-    try:
-        # Parse RSS feeds (already filters for tracked cities)
-        articles = parse_feeds_by_city(filter_tracked_only=True)
-
-        print(f"Found {len(articles)} articles from RSS feeds")
-
-        # Save each article to the database
-        for article in articles:
-            try:
-                # Get all locations for this article
-                locations = article.get("locations", [])
-
-                if not locations:
-                    continue
-
-                # Calculate sentiment from title and summary
-                text_for_sentiment = f"{article.get('title', '')} {article.get('summary', '')}"
-                sentiment_scores = sentiment_analyzer.polarity_scores(text_for_sentiment)
-                # Use compound score (ranges from -1 to 1)
-                sentiment_value = sentiment_scores['compound']
-
-                # Store article once with all locations in array
-                news_data = {
-                    "title": article.get("title", "No title"),
-                    "locations": locations,  # Array of all locations mentioned
-                    "image_url": None,  # RSS feeds typically don't include images
-                    "description": article.get("summary", ""),
-                    "sentiment": sentiment_value,  # Calculated using VADER sentiment analysis
-                    "url": article.get("link"),
-                }
-
-                # Check if this article already exists (based on URL only)
-                existing = supabase.table("news").select("id").eq("url", news_data["url"]).execute()
-
-                if not existing.data:  # Only insert if not a duplicate
-                    supabase.table("news").insert(news_data).execute()
-                    saved_count += 1
-
-            except Exception as article_error:
-                errors.append(f"Error saving article '{article.get('title', 'Unknown')}': {str(article_error)}")
-                continue
-
-    except Exception as e:
-        errors.append(f"Error parsing RSS feeds: {str(e)}")
-
-    return {
-        "saved_count": saved_count,
-        "total_articles": len(articles) if 'articles' in locals() else 0,
-        "errors": errors
-    }
 
 @app.get("/news") # Fetch news from RSS feeds and save to database
 def get_news() -> dict:
     try:
         # Fetch and save articles from RSS feeds
-        result = fetch_and_save_rss_articles()
+        result = fetch_and_save_rss_articles(supabase)
 
         return {
             "status": "success",
