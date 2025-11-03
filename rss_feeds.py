@@ -2,7 +2,8 @@ import feedparser
 from geotext import GeoText
 from data_handlers import get_all_cities
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import socket
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 def load_rss_feeds(feeds_file="rss_feeds.txt"):
     """
@@ -52,7 +53,9 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
     print(f"Parsing feed: {url}")
 
     try:
-        feed = feedparser.parse(url)
+        # Set socket timeout to 30 seconds for feed parsing
+        socket.setdefaulttimeout(30)
+        feed = feedparser.parse(url, request_headers={'User-Agent': 'Mozilla/5.0'})
 
         for entry in feed.entries:
             # Combine title and summary for better city detection
@@ -72,14 +75,14 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
             # Use link as unique identifier for the article
             article_link = entry.link
 
-            # Create article entry (convert to set first to remove duplicates)
+            # Create article entry (use set for locations)
             articles_dict[article_link] = {
                 "title": entry.title,
                 "link": article_link,
                 "source": feed.feed.get("title", "Unknown"),
                 "published": entry.get("published", "Unknown"),
                 "summary": entry.get("summary", "")[:200],  # First 200 chars
-                "locations": list(set(cities))
+                "locations": set(cities)
             }
 
     except Exception as e:
@@ -137,27 +140,32 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
         }
 
         # Process completed tasks as they finish
-        for future in as_completed(future_to_url):
+        for future in as_completed(future_to_url, timeout=60):
             url = future_to_url[future]
             try:
-                feed_articles = future.result()
+                # Set timeout for individual feed processing (30 seconds)
+                feed_articles = future.result(timeout=30)
 
                 # Merge articles from this feed into the main dict
                 for article_link, article_data in feed_articles.items():
                     if article_link in articles_dict:
-                        # Add cities that aren't already in the locations list
-                        existing_locations = set(articles_dict[article_link]["locations"])
-                        for city in article_data["locations"]:
-                            if city not in existing_locations:
-                                articles_dict[article_link]["locations"].append(city)
+                        # Merge location sets (automatically handles duplicates)
+                        articles_dict[article_link]["locations"].update(article_data["locations"])
                     else:
                         articles_dict[article_link] = article_data
 
+            except TimeoutError:
+                print(f"Timeout while processing {url}")
             except Exception as e:
                 print(f"Error processing results from {url}: {str(e)}")
 
-    # Convert dict to list of articles
-    return list(articles_dict.values())
+    # Convert dict to list of articles and convert location sets to lists
+    articles_list = []
+    for article in articles_dict.values():
+        article["locations"] = list(article["locations"])
+        articles_list.append(article)
+
+    return articles_list
 
 if __name__ == "__main__":
     articles = parse_feeds_by_city(filter_tracked_only=True)
@@ -165,3 +173,5 @@ if __name__ == "__main__":
     unique_cities = set()
     for article in articles:
         unique_cities.update(article["locations"])
+
+    print(articles)
