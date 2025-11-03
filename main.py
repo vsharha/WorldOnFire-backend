@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+from datetime import datetime
 
 from starlette.middleware.cors import CORSMiddleware
 
@@ -58,6 +59,50 @@ app.add_middleware(
 
 def get_cities_query_or_clause(cities: list[str]) -> list[dict]: # Helper to generate the $or clause with Wikipedia URIs for given cities
     return [{"locationUri": f"http://en.wikipedia.org/wiki/{city}"} for city in cities]
+
+def get_cached_coordinates(location: str) -> Optional[list[float]]:
+    """
+    Retrieve cached coordinates for a location from the database.
+
+    Args:
+        location: The location name to look up
+
+    Returns:
+        [latitude, longitude] if found, None otherwise
+    """
+    try:
+        result = supabase.table("location_cache").select("latitude, longitude").eq("location", location).execute()
+        if result.data and len(result.data) > 0:
+            coord = result.data[0]
+            return [coord["latitude"], coord["longitude"]]
+        return None
+    except Exception as e:
+        print(f"Error retrieving cached coordinates for {location}: {str(e)}")
+        return None
+
+def cache_coordinates(location: str, latitude: float, longitude: float) -> bool:
+    """
+    Store coordinates for a location in the database cache.
+
+    Args:
+        location: The location name
+        latitude: The latitude coordinate
+        longitude: The longitude coordinate
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        supabase.table("location_cache").upsert({
+            "location": location,
+            "latitude": latitude,
+            "longitude": longitude,
+            "updated_at": datetime.now().isoformat()
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Error caching coordinates for {location}: {str(e)}")
+        return False
 
 # Pydantic model for news data
 class NewsItem(BaseModel):
@@ -263,21 +308,36 @@ def get_heatmap() -> list[dict[str, Any]]:
             heatmap_data[location]["sum"] += sentiment
             heatmap_data[location]["count"] += 1
 
-        # Initialize geocoder
+        # Initialize geocoder (only used if cache miss)
         geolocator = Nominatim(user_agent="worldonfire-backend")
 
         # Add coordinates to each location and calculate average sentiment
         result_data = []
+        cache_hits = 0
+        cache_misses = 0
+
         for location, sentiment_data in heatmap_data.items():
             coordinates = None
-            try:
-                # Geocode the location
-                geo_result = geolocator.geocode(location, timeout=10)
-                if geo_result:
-                    coordinates = [geo_result.latitude, geo_result.longitude]
-            except (GeocoderTimedOut, GeocoderServiceError) as geo_error:
-                # Log error but continue with None coordinates
-                print(f"Geocoding error for {location}: {str(geo_error)}")
+
+            # First, try to get coordinates from cache
+            cached_coords = get_cached_coordinates(location)
+
+            if cached_coords:
+                coordinates = cached_coords
+                cache_hits += 1
+            else:
+                # Cache miss - geocode the location
+                cache_misses += 1
+                try:
+                    geo_result = geolocator.geocode(location, timeout=10)
+                    if geo_result:
+                        coordinates = [geo_result.latitude, geo_result.longitude]
+                        # Cache the result for future use
+                        cache_coordinates(location, geo_result.latitude, geo_result.longitude)
+                        print(f"Geocoded and cached: {location}")
+                except (GeocoderTimedOut, GeocoderServiceError) as geo_error:
+                    # Log error but continue with None coordinates
+                    print(f"Geocoding error for {location}: {str(geo_error)}")
 
             # Calculate average sentiment
             average_sentiment = sentiment_data["sum"] / sentiment_data["count"] if sentiment_data["count"] > 0 else 0
@@ -288,6 +348,7 @@ def get_heatmap() -> list[dict[str, Any]]:
                 "coordinates": coordinates
             })
 
+        print(f"Coordinate cache stats - Hits: {cache_hits}, Misses: {cache_misses}")
         return result_data
 
     except Exception as heatmap_error:

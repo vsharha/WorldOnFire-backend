@@ -18,3 +18,11 @@ def get_americas_cities() -> list[str]:
         "New_York_City", "Los_Angeles", "Mexico_City", "São_Paulo", "Toronto",
         "Buenos_Aires", "Rio_de_Janeiro", "Chicago", "Bogotá", "Lima"
     ]
+
+def get_all_cities() -> list[str]:
+    """Returns all tracked cities from all regions combined"""
+    return (
+        get_asia_oceania_cities() +
+        get_europe_africa_middleeast_cities() +
+        get_americas_cities()
+    )
