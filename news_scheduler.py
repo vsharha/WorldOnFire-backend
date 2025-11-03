@@ -60,10 +60,17 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                     "url": article.get("link"),
                 }
 
-                # Check if this article already exists (based on URL only)
-                existing = supabase.table("news").select("id").eq("url", news_data["url"]).execute()
+                # Check if this article already exists (by URL or title)
+                # First check by URL (most reliable)
+                existing_by_url = None
+                if news_data["url"]:
+                    existing_by_url = supabase.table("news").select("id").eq("url", news_data["url"]).execute()
 
-                if not existing.data:  # Only insert if not a duplicate
+                # Also check by title to catch duplicates with different URLs
+                existing_by_title = supabase.table("news").select("id").eq("title", news_data["title"]).execute()
+
+                # Only insert if not found by URL or title
+                if not (existing_by_url and existing_by_url.data) and not (existing_by_title and existing_by_title.data):
                     supabase.table("news").insert(news_data).execute()
                     saved_count += 1
 
