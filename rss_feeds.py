@@ -1,45 +1,67 @@
-feeds = [
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.nbcnews.com/nbcnews/public/news",
-    "https://www.cnbc.com/id/100727362/device/rss/rss.html",
-    "https://abcnews.go.com/abcnews/internationalheadlines",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://www.cbsnews.com/latest/rss/world",
-    "https://www.france24.com/en/rss",
-    "https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/world/rss.xml",
-    "https://feeds.washingtonpost.com/rss/world",
-    "https://globalnews.ca/world/feed/",
-    "https://feeds.feedburner.com/time/world",
-    "https://feeds.npr.org/1004/rss.xml",
-    "https://www.washingtontimes.com/rss/headlines/news/world",
-    "https://www.smh.com.au/rss/world.xml",
-    "https://feeds.skynews.com/feeds/rss/world.xml",
-    "https://www.latimes.com/world-nation/rss2.0.xml#nt=1col-7030col1",
-    "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
-    "https://www.rt.com/rss/news/",
-    "https://feeds.feedburner.com/ndtvnews-world-news",
-    "https://www.e-ir.info/feed/"
-]
-
 import feedparser
 from geotext import GeoText
-from collections import defaultdict
 from data_handlers import get_all_cities
+import os
 
-def parse_feeds_by_city(filter_tracked_only=True):
+def load_rss_feeds(feeds_file="rss_feeds.txt"):
+    """
+    Load RSS feed URLs from a text file.
+
+    Args:
+        feeds_file: Path to the text file containing RSS feed URLs (one per line)
+
+    Returns:
+        list: List of RSS feed URLs
+    """
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    feeds_path = os.path.join(script_dir, feeds_file)
+
+    feeds = []
+    try:
+        with open(feeds_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Strip whitespace and skip empty lines or comments
+                url = line.strip()
+                if url and not url.startswith('#'):
+                    feeds.append(url)
+        print(f"Loaded {len(feeds)} RSS feeds from {feeds_file}")
+    except FileNotFoundError:
+        print(f"Error: {feeds_file} not found. Please create it with one RSS feed URL per line.")
+        return []
+    except Exception as e:
+        print(f"Error loading feeds file: {str(e)}")
+        return []
+
+    return feeds
+
+def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt"):
     """
     Parse all RSS feeds and extract city names dynamically.
 
     Args:
         filter_tracked_only: If True, only returns news for tracked cities (default: True)
+        feeds_file: Path to the text file containing RSS feed URLs (default: "rss_feeds.txt")
 
     Returns:
-        dict: Dictionary with city names as keys and list of news items as values
-              Example: {
-                  "London": [{"title": "...", "link": "...", "source": "..."}],
-                  "Paris": [{"title": "...", "link": "...", "source": "..."}]
-              }
+        list: List of articles, each with related locations
+              Example: [
+                  {
+                      "title": "...",
+                      "link": "...",
+                      "source": "...",
+                      "published": "...",
+                      "summary": "...",
+                      "locations": ["London", "Paris"]
+                  }
+              ]
     """
+    # Load RSS feeds from file
+    feeds = load_rss_feeds(feeds_file)
+    if not feeds:
+        print("No feeds loaded. Returning empty results.")
+        return []
+
     # Get list of tracked cities for filtering
     tracked_cities = set(get_all_cities())
 
@@ -48,8 +70,9 @@ def parse_feeds_by_city(filter_tracked_only=True):
     normalized_tracked = {city.replace("_", " ") for city in tracked_cities}
     normalized_tracked.update(tracked_cities)  # Keep original names too
 
-    # Use defaultdict to automatically create lists for new cities
-    news_by_city = defaultdict(list)
+    # Use dict to store articles by their link (unique identifier)
+    # This prevents duplicates and allows us to accumulate locations per article
+    articles_dict = {}
 
     for url in feeds:
         print(f"Parsing feed: {url}")
@@ -63,61 +86,88 @@ def parse_feeds_by_city(filter_tracked_only=True):
                 # Extract all cities mentioned in the text
                 cities = GeoText(text).cities
 
-                # Add this news item to each city it mentions
-                for city in cities:
-                    # Skip if filtering is enabled and city is not tracked
-                    if filter_tracked_only and city not in normalized_tracked:
-                        continue
+                # Filter cities if needed
+                if filter_tracked_only:
+                    cities = [city for city in cities if city in normalized_tracked]
 
-                    news_by_city[city].append({
+                # Skip if no relevant cities found
+                if not cities:
+                    continue
+
+                # Use link as unique identifier for the article
+                article_link = entry.link
+
+                # If article already exists, add new cities to its locations
+                if article_link in articles_dict:
+                    # Add cities that aren't already in the locations list
+                    existing_locations = set(articles_dict[article_link]["locations"])
+                    for city in cities:
+                        if city not in existing_locations:
+                            articles_dict[article_link]["locations"].append(city)
+                else:
+                    # Create new article entry
+                    articles_dict[article_link] = {
                         "title": entry.title,
-                        "link": entry.link,
+                        "link": article_link,
                         "source": feed.feed.get("title", "Unknown"),
                         "published": entry.get("published", "Unknown"),
-                        "summary": entry.get("summary", "")[:200]  # First 200 chars
-                    })
+                        "summary": entry.get("summary", "")[:200],  # First 200 chars
+                        "locations": list(cities)
+                    }
 
         except Exception as e:
             print(f"Error parsing {url}: {str(e)}")
             continue
 
-    # Convert defaultdict to regular dict for cleaner output
-    return dict(news_by_city)
+    # Convert dict to list of articles
+    return list(articles_dict.values())
 
-# Parse all feeds and get results organized by city (filtered to tracked cities only)
-news_by_city = parse_feeds_by_city(filter_tracked_only=True)
+if __name__ == "__main__":
+    # Parse all feeds and get results as list of articles (filtered to tracked cities only)
+    articles = parse_feeds_by_city(filter_tracked_only=True)
 
-# Get total tracked cities for comparison
-total_tracked = len(get_all_cities())
+    # Get total tracked cities for comparison
+    total_tracked = len(get_all_cities())
 
-# Display results
-print(f"\n{'='*60}")
-print(f"TRACKED CITIES: Found news for {len(news_by_city)}/{total_tracked} tracked cities")
-print(f"{'='*60}\n")
+    # Count unique cities mentioned across all articles
+    unique_cities = set()
+    for article in articles:
+        unique_cities.update(article["locations"])
 
-# Sort cities by number of articles (most mentioned first)
-sorted_cities = sorted(news_by_city.items(), key=lambda x: len(x[1]), reverse=True)
+    # Display results
+    print(f"\n{'='*60}")
+    print(f"TRACKED CITIES: Found news mentioning {len(unique_cities)}/{total_tracked} tracked cities")
+    print(f"{'='*60}\n")
 
-for city, articles in sorted_cities:
-    print(f"\n{city} ({len(articles)} articles):")
-    print("-" * 40)
-    for article in articles[:3]:  # Show first 3 articles per city
-        print(f"  [{article['source']}] {article['title']}")
-        print(f"  Link: {article['link']}")
-    if len(articles) > 3:
-        print(f"  ... and {len(articles) - 3} more")
+    # Sort articles by number of locations (most locations first)
+    sorted_articles = sorted(articles, key=lambda x: len(x["locations"]), reverse=True)
 
-# Show summary statistics
-total_articles = sum(len(articles) for articles in news_by_city.values())
-print(f"\n{'='*60}")
-print(f"SUMMARY:")
-print(f"  Total tracked cities with news: {len(news_by_city)}/{total_tracked}")
-print(f"  Total articles collected: {total_articles}")
-print(f"  Average articles per city: {total_articles / len(news_by_city):.1f}" if news_by_city else "  No articles found")
-print(f"{'='*60}")
+    # Display first 10 articles
+    print(f"Showing first 10 articles (out of {len(articles)} total):\n")
+    for i, article in enumerate(sorted_articles[:10], 1):
+        print(f"{i}. [{article['source']}] {article['title']}")
+        print(f"   Locations: {', '.join(article['locations'])}")
+        print(f"   Link: {article['link']}")
+        print(f"   Published: {article['published']}")
+        if article.get('summary'):
+            print(f"   Summary: {article['summary']}")
+        print()
 
-# Example usage: Access the results programmatically
-print("\n\n# HOW TO USE THE RESULTS:")
-print("# news_by_city is a dict with city names as keys")
-print(f"# Example: news_by_city['London'] returns list of {len(news_by_city.get('London', []))} articles" if 'London' in news_by_city else "# Example: 'London' not found in current results")
-print(f"# All cities: {list(news_by_city.keys())}")
+    # Show summary statistics
+    print(f"{'='*60}")
+    print(f"SUMMARY:")
+    print(f"  Total tracked cities with news: {len(unique_cities)}/{total_tracked}")
+    print(f"  Total articles collected: {len(articles)}")
+    if articles:
+        avg_locations = sum(len(a["locations"]) for a in articles) / len(articles)
+        print(f"  Average locations per article: {avg_locations:.1f}")
+    else:
+        print("  No articles found")
+    print(f"{'='*60}")
+
+    # Example usage: Access the results programmatically
+    print("\n\n# HOW TO USE THE RESULTS:")
+    print("# articles is a list of article dictionaries")
+    print("# Each article has a 'locations' field with list of cities")
+    print(f"# Example: articles[0] = {articles[0] if articles else 'No articles'}")
+    print(f"# Cities mentioned: {sorted(list(unique_cities))}")
