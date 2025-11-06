@@ -54,7 +54,7 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                 news_data = {
                     "title": article.get("title", "No title"),
                     "locations": locations,  # Array of all locations mentioned
-                    "image_url": None,  # RSS feeds typically don't include images
+                    "image_url": article.get("image_url"),  # Extracted from article page
                     "description": article.get("summary", ""),
                     "sentiment": sentiment_value,  # Calculated using VADER sentiment analysis
                     "url": article.get("link"),
@@ -126,8 +126,20 @@ async def lifespan(app, supabase: Client):
         app: FastAPI application instance
         supabase: Supabase client instance
     """
-    # Startup: Create scheduler job and start the scheduler
+    # Startup: Fetch news immediately, then create scheduler job
     print("Starting news scheduler...")
+
+    # Fetch news immediately on startup
+    print("Fetching news immediately on startup...")
+    try:
+        result = fetch_and_save_rss_articles(supabase)
+        print(f"Initial fetch completed: {result['saved_count']} articles saved out of {result['total_articles']} found")
+        if result['errors']:
+            print(f"Errors during initial fetch: {result['errors']}")
+    except Exception as e:
+        print(f"Error in initial fetch: {str(e)}")
+
+    # Create scheduler job and start the scheduler
     create_scheduler_job(supabase, interval_minutes=10)
     scheduler.start()
     print("News scheduler started - fetching RSS feeds every 10 minutes")
