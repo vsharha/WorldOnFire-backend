@@ -46,28 +46,32 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                 if not locations:
                     continue
 
-                # Check if article is from the last 20 minutes
+                # Check if article has a published date
                 published_str = article.get("published", "")
-                if published_str and published_str != "Unknown":
-                    try:
-                        # Parse the published date
-                        published_date = date_parser.parse(published_str)
+                if not published_str or published_str == "Unknown":
+                    print(f"Skipping article without published date: {article.get('title', 'Unknown')[:50]}")
+                    continue
 
-                        # Make it timezone-aware if it's naive
-                        if published_date.tzinfo is None:
-                            published_date = published_date.replace(tzinfo=datetime.now().astimezone().tzinfo)
+                # Parse and validate the published date
+                try:
+                    # Parse the published date
+                    published_date = date_parser.parse(published_str)
 
-                        # Calculate time difference
-                        now = datetime.now().astimezone()
-                        time_diff = now - published_date
+                    # Make it timezone-aware if it's naive
+                    if published_date.tzinfo is None:
+                        published_date = published_date.replace(tzinfo=datetime.now().astimezone().tzinfo)
 
-                        # Skip if older than 20 minutes
-                        if time_diff > timedelta(minutes=20):
-                            print(f"Skipping old article (published {time_diff} ago): {article.get('title', 'Unknown')[:50]}")
-                            continue
-                    except (ValueError, TypeError) as date_error:
-                        print(f"Could not parse date '{published_str}' for article: {article.get('title', 'Unknown')[:50]}")
-                        # Continue processing if date parsing fails
+                    # Calculate time difference
+                    now = datetime.now().astimezone()
+                    time_diff = now - published_date
+
+                    # Skip if older than 20 minutes
+                    if time_diff > timedelta(minutes=20):
+                        print(f"Skipping old article (published {time_diff} ago): {article.get('title', 'Unknown')[:50]}")
+                        continue
+                except (ValueError, TypeError) as date_error:
+                    print(f"Skipping article with unparseable date '{published_str}': {article.get('title', 'Unknown')[:50]}")
+                    continue
 
                 # Calculate sentiment from title and summary
                 text_for_sentiment = f"{article.get('title', '')} {article.get('summary', '')}"
