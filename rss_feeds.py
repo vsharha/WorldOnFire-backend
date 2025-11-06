@@ -90,14 +90,14 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
 
     return articles_dict
 
-def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", max_workers=5):
+def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", max_workers=15):
     """
     Parse all RSS feeds in parallel and extract city names dynamically.
 
     Args:
         filter_tracked_only: If True, only returns news for tracked cities (default: True)
         feeds_file: Path to the text file containing RSS feed URLs (default: "rss_feeds.txt")
-        max_workers: Maximum number of parallel workers (default: 5)
+        max_workers: Maximum number of parallel workers (default: 15)
 
     Returns:
         list: List of articles, each with related locations
@@ -136,24 +136,32 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
         }
 
         # Process completed tasks as they finish
-        for future in as_completed(future_to_url, timeout=60):
-            url = future_to_url[future]
-            try:
-                # Set timeout for individual feed processing (30 seconds)
-                feed_articles = future.result(timeout=30)
+        try:
+            for future in as_completed(future_to_url, timeout=300):
+                url = future_to_url[future]
+                try:
+                    # Set timeout for individual feed processing (30 seconds)
+                    feed_articles = future.result(timeout=30)
 
-                # Merge articles from this feed into the main dict
-                for article_link, article_data in feed_articles.items():
-                    if article_link in articles_dict:
-                        # Merge location sets (automatically handles duplicates)
-                        articles_dict[article_link]["locations"].update(article_data["locations"])
-                    else:
-                        articles_dict[article_link] = article_data
+                    # Merge articles from this feed into the main dict
+                    for article_link, article_data in feed_articles.items():
+                        if article_link in articles_dict:
+                            # Merge location sets (automatically handles duplicates)
+                            articles_dict[article_link]["locations"].update(article_data["locations"])
+                        else:
+                            articles_dict[article_link] = article_data
 
-            except TimeoutError:
-                print(f"Timeout while processing {url}")
-            except Exception as e:
-                print(f"Error processing results from {url}: {str(e)}")
+                except TimeoutError:
+                    print(f"Timeout while processing {url}")
+                except Exception as e:
+                    print(f"Error processing results from {url}: {str(e)}")
+        except TimeoutError:
+            # Overall timeout reached - some feeds didn't complete in time
+            # Count how many feeds are still pending
+            completed = sum(1 for f in future_to_url if f.done())
+            pending = len(future_to_url) - completed
+            print(f"Overall timeout reached: {completed}/{len(feeds)} feeds completed, {pending} feeds still pending")
+            print("Proceeding with articles from completed feeds...")
 
     # Convert dict to list of articles and convert location sets to lists
     articles_list = []
