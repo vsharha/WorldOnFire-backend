@@ -119,8 +119,8 @@ def get_news() -> dict:
 @app.get("/news/latest") # Retrieve 10 latest news from the database
 def get_latest_news() -> list[dict[str, Any]]:
     try:
-        # Order by created_at descending and limit to 10
-        result = supabase.table("news").select("*").order("created_at", desc=True).limit(10).execute()
+        # Order by published_at descending and limit to 10
+        result = supabase.table("news").select("*").order("published_at", desc=True).limit(10).execute()
         return result.data
     except Exception as latest_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve latest news: {str(latest_error)}")
@@ -134,8 +134,8 @@ def search_news(location: Optional[str] = None) -> list[dict[str, Any]]:
             # Use PostgreSQL array contains operator for locations array search
             query = query.contains("locations", [location])
 
-        # Order by created_at descending and limit to 10
-        result = query.order("created_at", desc=True).limit(10).execute()
+        # Order by published_at descending and limit to 10
+        result = query.order("published_at", desc=True).limit(10).execute()
         return result.data
     except Exception as search_error:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve news: {str(search_error)}")
