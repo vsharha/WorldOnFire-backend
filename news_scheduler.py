@@ -7,6 +7,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from supabase import Client
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rss_feeds import parse_feeds_by_city
+from datetime import datetime, timedelta
+from dateutil import parser as date_parser
 
 # Initialize scheduler
 scheduler = BackgroundScheduler()
@@ -43,6 +45,29 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
 
                 if not locations:
                     continue
+
+                # Check if article is from the last 20 minutes
+                published_str = article.get("published", "")
+                if published_str and published_str != "Unknown":
+                    try:
+                        # Parse the published date
+                        published_date = date_parser.parse(published_str)
+
+                        # Make it timezone-aware if it's naive
+                        if published_date.tzinfo is None:
+                            published_date = published_date.replace(tzinfo=datetime.now().astimezone().tzinfo)
+
+                        # Calculate time difference
+                        now = datetime.now().astimezone()
+                        time_diff = now - published_date
+
+                        # Skip if older than 20 minutes
+                        if time_diff > timedelta(minutes=20):
+                            print(f"Skipping old article (published {time_diff} ago): {article.get('title', 'Unknown')[:50]}")
+                            continue
+                    except (ValueError, TypeError) as date_error:
+                        print(f"Could not parse date '{published_str}' for article: {article.get('title', 'Unknown')[:50]}")
+                        # Continue processing if date parsing fails
 
                 # Calculate sentiment from title and summary
                 text_for_sentiment = f"{article.get('title', '')} {article.get('summary', '')}"
