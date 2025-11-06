@@ -89,6 +89,7 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                     "description": article.get("summary", ""),
                     "sentiment": sentiment_value,  # Calculated using VADER sentiment analysis
                     "url": article.get("link"),
+                    "published_at": published_date.isoformat(),  # Store the actual published date
                 }
 
                 # Check if this article already exists (by URL or title)
