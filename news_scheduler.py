@@ -4,11 +4,13 @@ News scheduler module - Handles periodic RSS feed fetching and parsing
 
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
-from supabase import Client
+from supabase import Client, create_client
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from rss_feeds import parse_feeds_by_city
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser
+from dotenv import load_dotenv
+import os
 
 # Initialize scheduler
 scheduler = BackgroundScheduler()
@@ -65,8 +67,8 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                     now = datetime.now().astimezone()
                     time_diff = now - published_date
 
-                    # Skip if older than 20 minutes
-                    if time_diff > timedelta(minutes=60):
+                    # Skip if older than 24 hours
+                    if time_diff > timedelta(hours=24):
                         print(f"Skipping old article (published {time_diff} ago): {article.get('title', 'Unknown')[:50]}")
                         continue
                 except (ValueError, TypeError) as date_error:
@@ -117,13 +119,13 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
     }
 
 
-def create_scheduler_job(supabase: Client, interval_minutes: int = 10):
+def create_scheduler_job(supabase: Client, interval_hours: int = 12):
     """
     Create and configure the scheduled job for fetching news.
 
     Args:
         supabase: Supabase client instance
-        interval_minutes: How often to fetch news (default: 10 minutes)
+        interval_hours: How often to fetch news (default: 12 hours)
     """
     def scheduled_fetch():
         """Wrapper function for the scheduled job"""
@@ -139,7 +141,7 @@ def create_scheduler_job(supabase: Client, interval_minutes: int = 10):
     scheduler.add_job(
         scheduled_fetch,
         'interval',
-        minutes=interval_minutes,
+        hours=interval_hours,
         id='fetch_rss_news',
         replace_existing=True
     )
@@ -155,23 +157,13 @@ async def lifespan(app, supabase: Client):
         app: FastAPI application instance
         supabase: Supabase client instance
     """
-    # Startup: Fetch news immediately, then create scheduler job
+    # Startup: Create scheduler job
     print("Starting news scheduler...")
 
-    # Fetch news immediately on startup
-    print("Fetching news immediately on startup...")
-    try:
-        result = fetch_and_save_rss_articles(supabase)
-        print(f"Initial fetch completed: {result['saved_count']} articles saved out of {result['total_articles']} found")
-        if result['errors']:
-            print(f"Errors during initial fetch: {result['errors']}")
-    except Exception as e:
-        print(f"Error in initial fetch: {str(e)}")
-
     # Create scheduler job and start the scheduler
-    create_scheduler_job(supabase, interval_minutes=10)
+    create_scheduler_job(supabase, interval_hours=12)
     scheduler.start()
-    print("News scheduler started - fetching RSS feeds every 10 minutes")
+    print("News scheduler started - fetching RSS feeds every 12 hours")
 
     yield  # App is running
 
@@ -179,3 +171,45 @@ async def lifespan(app, supabase: Client):
     print("Stopping news scheduler...")
     scheduler.shutdown()
     print("News scheduler stopped")
+
+
+def main():
+    """
+    Main function to run RSS feed fetching once for testing purposes.
+    """
+    # Load environment variables
+    load_dotenv()
+
+    # Initialize Supabase client
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("Error: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment variables")
+        return
+
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+    # Run the fetch once
+    print("Starting RSS feed fetch...")
+    result = fetch_and_save_rss_articles(supabase)
+
+    # Print results
+    print(f"\n{'='*60}")
+    print(f"RSS Feed Fetch Complete")
+    print(f"{'='*60}")
+    print(f"Total articles found: {result['total_articles']}")
+    print(f"Articles saved: {result['saved_count']}")
+    print(f"Success rate: {result['saved_count']}/{result['total_articles']}")
+
+    if result['errors']:
+        print(f"\nErrors encountered ({len(result['errors'])}):")
+        for error in result['errors']:
+            print(f"  - {error}")
+    else:
+        print("\nNo errors encountered")
+    print(f"{'='*60}\n")
+
+
+if __name__ == "__main__":
+    main()
