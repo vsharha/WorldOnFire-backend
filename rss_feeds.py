@@ -4,6 +4,10 @@ from data_handlers import get_all_cities
 import os
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import re
 
 def load_rss_feeds(feeds_file="rss_feeds.txt"):
     """
@@ -36,6 +40,131 @@ def load_rss_feeds(feeds_file="rss_feeds.txt"):
         return []
 
     return feeds
+
+def extract_article_content(article_url, timeout=10):
+    """
+    Extract the first non-logo image and text content from an article page.
+
+    Args:
+        article_url: The URL of the article to extract content from
+        timeout: Request timeout in seconds (default: 10)
+
+    Returns:
+        tuple: (image_url, text_content) where image_url is the first non-logo image
+               (or None), and text_content is the extracted article text (or empty string)
+    """
+    try:
+        # Fetch the article page
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(article_url, timeout=timeout, headers=headers)
+        response.raise_for_status()
+
+        # Parse HTML
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Extract image
+        image_url = None
+        exclude_patterns = [
+            'logo', 'icon', 'header', 'banner', 'avatar', 'profile', 'badge',
+            'favicon', 'sprite', 'placeholder', 'default', 'fallback',
+            'navigation', 'nav', 'menu', 'social', 'share', 'button', 'btn',
+            'arrow', 'bullet', 'thumbnail', 'thumb', 'ad', 'advertisement',
+            'widget', 'sidebar', 'footer', 'sponsor'
+        ]
+
+        images = soup.find_all('img')
+        for img in images:
+            img_url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+            if not img_url:
+                continue
+
+            img_url = urljoin(article_url, img_url)
+
+            if (img_url.startswith('data:') or
+                img_url.lower().endswith('.svg') or
+                img_url.lower().endswith('.gif')):
+                continue
+
+            img_lower = img_url.lower()
+            alt_text = (img.get('alt') or '').lower()
+            class_names = ' '.join(img.get('class', [])).lower()
+            img_id = (img.get('id') or '').lower()
+
+            if any(pattern in img_lower or pattern in alt_text or
+                   pattern in class_names or pattern in img_id
+                   for pattern in exclude_patterns):
+                continue
+
+            width = img.get('width')
+            height = img.get('height')
+
+            try:
+                if width and int(width) < 200:
+                    continue
+                if height and int(height) < 150:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+            image_url = img_url
+            break
+
+        # Extract text content
+        text_content = ""
+
+        # Try to find article content in common article containers
+        article_selectors = [
+            'article',
+            '[class*="article"]',
+            '[class*="content"]',
+            '[class*="post"]',
+            '[class*="entry"]',
+            'main',
+            '[role="main"]'
+        ]
+
+        article_element = None
+        for selector in article_selectors:
+            article_element = soup.select_one(selector)
+            if article_element:
+                break
+
+        # If no article container found, use body
+        if not article_element:
+            article_element = soup.body
+
+        if article_element:
+            # Remove script, style, nav, footer, aside elements
+            for element in article_element(['script', 'style', 'nav', 'footer', 'aside', 'header']):
+                element.decompose()
+
+            # Get text from paragraphs primarily
+            paragraphs = article_element.find_all('p')
+            if paragraphs:
+                text_content = ' '.join([p.get_text(strip=True) for p in paragraphs])
+            else:
+                # Fallback to all text
+                text_content = article_element.get_text(separator=' ', strip=True)
+
+        return image_url, text_content
+
+    except Exception as e:
+        print(f"Error extracting content from {article_url}: {str(e)}")
+        return None, ""
+
+def extract_first_image(article_url, timeout=10):
+    """
+    Extract only the first non-logo image from an article page (lightweight version).
+
+    Args:
+        article_url: The URL of the article to extract image from
+        timeout: Request timeout in seconds (default: 10)
+
+    Returns:
+        str: URL of the first non-logo image, or None if not found
+    """
+    image_url, _ = extract_article_content(article_url, timeout)
+    return image_url
 
 def parse_single_feed(url, normalized_tracked, filter_tracked_only):
     """
@@ -75,14 +204,65 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
             # Use link as unique identifier for the article
             article_link = entry.link
 
+            # Clean HTML from summary
+            raw_summary = entry.get("summary", "") or entry.get("description", "")
+            if raw_summary:
+                # Strip HTML tags using BeautifulSoup
+                clean_summary = BeautifulSoup(raw_summary, 'html.parser').get_text(separator=' ', strip=True)
+            else:
+                clean_summary = ""
+
+            # Try to extract image from RSS feed entry first
+            image_url = None
+
+            # Check for media:content (common in RSS feeds)
+            if hasattr(entry, 'media_content') and entry.media_content:
+                image_url = entry.media_content[0].get('url')
+
+            # Check for media:thumbnail
+            if not image_url and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                image_url = entry.media_thumbnail[0].get('url')
+
+            # Check for enclosures (like in podcasts/media RSS)
+            if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
+                for enclosure in entry.enclosures:
+                    if enclosure.get('type', '').startswith('image/'):
+                        image_url = enclosure.get('href') or enclosure.get('url')
+                        break
+
+            # Check for image in description/summary HTML
+            if not image_url and raw_summary:
+                soup = BeautifulSoup(raw_summary, 'html.parser')
+                img_tag = soup.find('img')
+                if img_tag:
+                    image_url = img_tag.get('src')
+
+            # If no summary or very short summary, fetch article content
+            need_fetch = not clean_summary or len(clean_summary.strip()) < 50
+
+            if need_fetch or not image_url:
+                # Only fetch if we need summary or image
+                if need_fetch:
+                    print(f"No description for {article_link}, fetching article content...")
+                fetched_image, article_text = extract_article_content(article_link)
+
+                # Use fetched image if we don't have one from RSS
+                if not image_url:
+                    image_url = fetched_image
+
+                # Use fetched text if we don't have a summary
+                if need_fetch and article_text:
+                    clean_summary = article_text
+
             # Create article entry (use set for locations)
             articles_dict[article_link] = {
                 "title": entry.title,
                 "link": article_link,
                 "source": feed.feed.get("title", "Unknown"),
                 "published": entry.get("published", "Unknown"),
-                "summary": entry.get("summary", "")[:200],  # First 200 chars
-                "locations": set(cities)
+                "summary": clean_summary[:200],  # First 200 chars of cleaned text
+                "locations": set(cities),
+                "image_url": image_url
             }
 
     except Exception as e:
@@ -100,7 +280,7 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
         max_workers: Maximum number of parallel workers (default: 15)
 
     Returns:
-        list: List of articles, each with related locations
+        list: List of articles, each with related locations and image
               Example: [
                   {
                       "title": "...",
@@ -108,7 +288,8 @@ def parse_feeds_by_city(filter_tracked_only=True, feeds_file="rss_feeds.txt", ma
                       "source": "...",
                       "published": "...",
                       "summary": "...",
-                      "locations": ["London", "Paris"]
+                      "locations": ["London", "Paris"],
+                      "image_url": "https://..."
                   }
               ]
     """
