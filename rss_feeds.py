@@ -255,12 +255,16 @@ def parse_single_feed(url, normalized_tracked, filter_tracked_only):
                     clean_summary = article_text
 
             # Create article entry (use set for locations)
+            # Get first 200 words from summary
+            summary_words = clean_summary.split()[:200]
+            summary_text = ' '.join(summary_words)
+
             articles_dict[article_link] = {
                 "title": entry.title,
                 "link": article_link,
                 "source": feed.feed.get("title", "Unknown"),
                 "published": entry.get("published", "Unknown"),
-                "summary": clean_summary[:200],  # First 200 chars of cleaned text
+                "summary": summary_text,  # First 200 words of cleaned text
                 "locations": set(cities),
                 "image_url": image_url
             }

@@ -66,7 +66,7 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                     time_diff = now - published_date
 
                     # Skip if older than 20 minutes
-                    if time_diff > timedelta(minutes=20):
+                    if time_diff > timedelta(minutes=60):
                         print(f"Skipping old article (published {time_diff} ago): {article.get('title', 'Unknown')[:50]}")
                         continue
                 except (ValueError, TypeError) as date_error:
