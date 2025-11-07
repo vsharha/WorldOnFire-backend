@@ -12,6 +12,7 @@ from datetime import datetime
 
 from starlette.middleware.cors import CORSMiddleware
 from news_scheduler import lifespan as scheduler_lifespan, fetch_and_save_rss_articles
+from geo_utils import get_cached_coordinates, cache_coordinates
 
 load_dotenv()
 
@@ -41,49 +42,6 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-def get_cached_coordinates(location: str) -> Optional[list[float]]:
-    """
-    Retrieve cached coordinates for a location from the database.
-
-    Args:
-        location: The location name to look up
-
-    Returns:
-        [latitude, longitude] if found, None otherwise
-    """
-    try:
-        result = supabase.table("location_cache").select("latitude, longitude").eq("location", location).execute()
-        if result.data and len(result.data) > 0:
-            coord = result.data[0]
-            return [coord["latitude"], coord["longitude"]]
-        return None
-    except Exception as e:
-        print(f"Error retrieving cached coordinates for {location}: {str(e)}")
-        return None
-
-def cache_coordinates(location: str, latitude: float, longitude: float) -> bool:
-    """
-    Store coordinates for a location in the database cache.
-
-    Args:
-        location: The location name
-        latitude: The latitude coordinate
-        longitude: The longitude coordinate
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        supabase.table("location_cache").upsert({
-            "location": location,
-            "latitude": latitude,
-            "longitude": longitude,
-            "updated_at": datetime.now().isoformat()
-        }).execute()
-        return True
-    except Exception as e:
-        print(f"Error caching coordinates for {location}: {str(e)}")
-        return False
 
 # Pydantic model for news data
 class NewsItem(BaseModel):
@@ -177,7 +135,7 @@ def get_heatmap() -> list[dict[str, Any]]:
             coordinates = None
 
             # First, try to get coordinates from cache
-            cached_coords = get_cached_coordinates(location)
+            cached_coords = get_cached_coordinates(supabase, location)
 
             if cached_coords:
                 coordinates = cached_coords
@@ -190,7 +148,7 @@ def get_heatmap() -> list[dict[str, Any]]:
                     if geo_result:
                         coordinates = [geo_result.latitude, geo_result.longitude]
                         # Cache the result for future use
-                        cache_coordinates(location, geo_result.latitude, geo_result.longitude)
+                        cache_coordinates(supabase, location, geo_result.latitude, geo_result.longitude)
                         print(f"Geocoded and cached: {location}")
                 except (GeocoderTimedOut, GeocoderServiceError) as geo_error:
                     # Log error but continue with None coordinates

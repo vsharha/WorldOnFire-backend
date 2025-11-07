@@ -10,6 +10,8 @@ from rss_feeds import parse_feeds_by_city
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser
 from dotenv import load_dotenv
+from geopy.geocoders import Nominatim
+from geo_utils import geocode_and_cache_location
 import os
 
 # Initialize scheduler
@@ -17,6 +19,9 @@ scheduler = BackgroundScheduler()
 
 # Initialize sentiment analyzer
 sentiment_analyzer = SentimentIntensityAnalyzer()
+
+# Initialize geocoder for coordinate caching
+geolocator = Nominatim(user_agent="worldonfire-backend")
 
 
 def fetch_and_save_rss_articles(supabase: Client) -> dict:
@@ -74,6 +79,15 @@ def fetch_and_save_rss_articles(supabase: Client) -> dict:
                 except (ValueError, TypeError) as date_error:
                     print(f"Skipping article with unparseable date '{published_str}': {article.get('title', 'Unknown')[:50]}")
                     continue
+
+                # Cache coordinates for all locations in this article
+                # This runs for each article to ensure coordinates are cached immediately
+                for location in locations:
+                    try:
+                        geocode_and_cache_location(supabase, location, geolocator)
+                    except Exception as geo_error:
+                        # Don't fail the entire article if geocoding fails
+                        print(f"Non-fatal error caching coordinates for {location}: {str(geo_error)}")
 
                 # Calculate sentiment from title and summary
                 text_for_sentiment = f"{article.get('title', '')} {article.get('summary', '')}"
